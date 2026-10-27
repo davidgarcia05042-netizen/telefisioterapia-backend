@@ -1,0 +1,101 @@
+# Blueprint de Render para la plataforma (docs/DECISIONES_TECNICAS.md, fase 1.6).
+# Los secretos van con `sync: false`: Render los pide en el Dashboard al crear
+# el blueprint y nunca quedan en este archivo.
+services:
+  - type: web
+    name: platform-api
+    runtime: docker
+    # Explícito, aunque sea el repositorio del propio blueprint: así una copia
+    # o un cambio de nombre no deja a Render construyendo el repositorio viejo.
+    repo: https://github.com/davidgarcia05042-netizen/telefisioterapia-backend
+    branch: main
+    # No usar el plan gratuito: se duerme y corta los hilos que envían videos
+    # al Servicio de Procesamiento.
+    plan: starter
+    region: oregon
+    healthCheckPath: /health
+    # En un despliegue, Render espera esto tras el SIGTERM antes de matar el
+    # contenedor viejo (1 a 300; 30 por defecto). Igual a --graceful-timeout de
+    # entrypoint.sh: el worker que se va termina el envío de video en curso.
+    maxShutdownDelaySeconds: 90
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: platform-db
+          property: connectionString
+      # ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS y PLATFORM_PUBLIC_URL no se fijan
+      # aquí: settings.py los deduce de RENDER_EXTERNAL_HOSTNAME y
+      # RENDER_EXTERNAL_URL, que Render inyecta con el nombre real (puede
+      # llevar sufijo, ej. platform-api-ab12).
+      # Definirlas en el Dashboard solo si se usa un dominio propio.
+      - key: CORS_ALLOWED_ORIGINS
+        # Nombre real del panel en Render (verificado el 2026-10-16).
+        value: https://platform-panel.onrender.com
+      - key: PROCESSING_SERVICE_URL
+        sync: false
+      - key: PROCESSING_HMAC_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      # Horas que vale un token de sesión (authentication/token_auth.py).
+      - key: TOKEN_TTL_HOURS
+        value: "12"
+      # Al iniciar sesión, el token se renueva si le quedan menos de estas horas.
+      - key: TOKEN_RENEW_HOURS
+        value: "2"
+      - key: SUPABASE_BUCKET
+        value: videos
+      # Cloudflare R2 (storage/r2.py). Sin STORAGE_BACKEND, o con "supabase",
+      # todo sigue en Supabase; con "r2", los videos nuevos van a R2. En un
+      # blueprint ya creado Render no pide estas claves: se cargan a mano en
+      # el Dashboard.
+      - key: STORAGE_BACKEND
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      # Base pública del bucket, ej. https://pub-xxxx.r2.dev (sin barra final).
+      - key: R2_PUBLIC_BASE_URL
+        sync: false
+      - key: DJANGO_SUPERUSER_USERNAME
+        sync: false
+      - key: DJANGO_SUPERUSER_EMAIL
+        sync: false
+      - key: DJANGO_SUPERUSER_PASSWORD
+        sync: false
+
+  - type: web
+    name: platform-panel
+    runtime: static
+    repo: https://github.com/davidgarcia05042-netizen/telefisioterapia-panel
+    branch: main
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    # Vue Router en modo history: toda ruta desconocida sirve index.html.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: VUE_APP_API_URL_REMOTE
+        # Nombre real del backend en Render (Render le asignó el sufijo -4qtl).
+        # Se incrusta al compilar: cambiarlo exige reconstruir el panel.
+        value: https://platform-api-4qtl.onrender.com
+
+databases:
+  - name: platform-db
+    plan: basic-256mb
+    region: oregon

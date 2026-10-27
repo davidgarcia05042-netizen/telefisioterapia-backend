@@ -1,0 +1,3 @@
+# Los scripts de shell se ejecutan dentro del contenedor Linux: con CRLF
+# (autocrlf en Windows) "sh" falla al leer el shebang en un build local.
+*.sh text eol=lf
